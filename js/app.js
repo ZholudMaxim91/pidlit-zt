@@ -16,24 +16,55 @@
   // Підписи пунктів біля Житомира ховаються на дрібному масштабі (видно при наведенні/виборі).
   var NEAR_KM = 25, NEAR_LABEL_ZOOM = 10;
   var MID_KM = 45, MID_LABEL_ZOOM = 8;
-  var LS = { theme: "zt-theme", zones: "zt-zones", favs: "zt-favorites" };
+  var LS = { theme: "zt-theme", zones: "zt-zones", favs: "zt-favorites", custom: "zt-custom-places" };
+  var MAX_CUSTOM = 300;          // скільки доданих користувачем пунктів зберігаємо
 
   var TARGET = window.ZT_TARGET;
-  var PLACES = window.ZT_PLACES.map(function (p, i) {
+  var GEO = window.ZTGeocode;
+  var nextId = 0;
+  var byId = {};
+
+  // Додає розрахункові поля до пункту (відстань, азимут, час підльоту, ключі пошуку).
+  function makePlace(p) {
     var km = distanceKm(p.lat, p.lon, TARGET.lat, TARGET.lon);
-    return Object.assign({}, p, {
-      id: i,
+    var place = Object.assign({}, p, {
+      id: nextId++,
+      key: p.custom ? "c:" + p.lat.toFixed(4) + "," + p.lon.toFixed(4) : p.name,   // ключ для «Обраного»
       km: km,
       bearing: bearingDeg(TARGET.lat, TARGET.lon, p.lat, p.lon),
       secFast: km / SPEED_MAX * 3600,
       secSlow: km / SPEED_MIN * 3600,
       keys: [p.name].concat(p.aliases || []).map(norm)
     });
-  });
+    byId[place.id] = place;
+    return place;
+  }
+
+  var PLACES = window.ZT_PLACES.map(makePlace);
 
   // ---------- Безпечний localStorage ----------
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* приватний режим */ } }
+
+  // Користувацькі пункти (зберігаються в цьому браузері/на цьому телефоні).
+  function loadCustom() {
+    var raw;
+    try { raw = JSON.parse(lsGet(LS.custom)) || []; } catch (e) { raw = []; }
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, MAX_CUSTOM).filter(function (c) {
+      return c && typeof c.name === "string" && c.name.length > 0 && c.name.length <= 80 &&
+        isFinite(c.lat) && isFinite(c.lon) && GEO.inOblastBox(+c.lat, +c.lon);
+    }).map(function (c) {
+      return { name: c.name, sub: typeof c.sub === "string" ? c.sub.slice(0, 120) : "",
+               lat: +c.lat, lon: +c.lon, src: "osm", custom: true };
+    });
+  }
+  function saveCustom() {
+    var list = PLACES.filter(function (p) { return p.custom; }).map(function (p) {
+      return { name: p.name, sub: p.sub, lat: p.lat, lon: p.lon };
+    });
+    lsSet(LS.custom, JSON.stringify(list));
+  }
 
   // ---------- Геометрія ----------
   function toRad(d) { return d * Math.PI / 180; }
@@ -116,7 +147,7 @@
   var favs = new Set();
   try { (JSON.parse(lsGet(LS.favs)) || []).forEach(function (n) { favs.add(n); }); } catch (e) {}
   function saveFavs() { lsSet(LS.favs, JSON.stringify(Array.from(favs))); }
-  function isFav(p) { return favs.has(p.name); }
+  function isFav(p) { return favs.has(p.key); }
 
   // ---------- Карта ----------
   var map = L.map("map", { zoomControl: false, attributionControl: true, minZoom: 6, maxZoom: 16 });
@@ -129,6 +160,7 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · координати: <a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a>'
   }).addTo(map);
 
+  // Початковий вигляд охоплює вбудовані пункти (доданий користувачем далекий пункт не «віддаляє» карту).
   var allBounds = L.latLngBounds(PLACES.map(function (p) { return [p.lat, p.lon]; }).concat([[TARGET.lat, TARGET.lon]]));
   function applyZoomClass() {
     var c = map.getContainer().classList, z = map.getZoom();
@@ -233,7 +265,7 @@
     m.setTooltipContent(tooltipHtml(p));
   }
 
-  PLACES.forEach(function (p) {
+  function addMarker(p) {
     var m = L.marker([p.lat, p.lon], { icon: iconFor(p), title: p.name, riseOnHover: true, keyboard: true })
       .bindTooltip(tooltipHtml(p), { direction: "top", offset: [0, -12], className: "ztip", opacity: 1 })
       .addTo(map);
@@ -255,7 +287,9 @@
       if (e.originalEvent && e.originalEvent.key === "Enter") select(p, false);
     });
     markers[p.id] = m;
-  });
+  }
+
+  PLACES.forEach(addMarker);
 
   map.on("click", function () { select(null); });
 
@@ -264,11 +298,14 @@
   var cardTitle = document.getElementById("card-title");
   var cardBody = document.getElementById("card-body");
   var cardFav = document.getElementById("card-fav");
+  var cardSub = document.getElementById("card-sub");
 
   function renderCard() {
     if (!selected) { card.hidden = true; return; }
     var p = selected;
     cardTitle.textContent = p.name;
+    cardSub.textContent = p.sub || "";
+    cardSub.hidden = !p.sub;
     cardFav.textContent = isFav(p) ? "★" : "☆";
     cardFav.setAttribute("aria-pressed", isFav(p) ? "true" : "false");
     cardFav.title = isFav(p) ? "Прибрати з обраного" : "Додати в обране";
@@ -282,7 +319,9 @@
         "<dt>⏱ За " + SPEED_MIN + " км/год</dt><dd>" + fmtDur(p.secSlow) + "</dd>" +
         "<dt>🧭 Напрямок загрози</dt><dd>" + DIRS[dirIndex(p.bearing)] + " (" + DIRS_SHORT[dirIndex(p.bearing)] + ", " + Math.round(p.bearing) + "°)</dd>" +
       "</dl>" +
-      (p.src === "map" ? '<p class="muted tiny">Координати визначено за картою, точність ≈ ±0,5 км.</p>' : "");
+      (p.src === "map" ? '<p class="muted tiny">Координати визначено за картою, точність ≈ ±0,5 км.</p>' : "") +
+      (p.custom ? '<p class="muted tiny">➕ Додано вами · координати OpenStreetMap. ' +
+        '<button type="button" class="link-btn" data-act="del">Видалити з карти</button></p>' : "");
     card.hidden = false;
   }
 
@@ -314,7 +353,7 @@
   });
 
   function toggleFav(p) {
-    if (isFav(p)) favs.delete(p.name); else favs.add(p.name);
+    if (isFav(p)) favs.delete(p.key); else favs.add(p.key);
     saveFavs();
     refreshMarker(p);
     if (selected === p) { markers[p.id].openTooltip(); renderCard(); }
@@ -352,7 +391,8 @@
   favList.addEventListener("click", function (e) {
     var btn = e.target.closest("button");
     if (!btn) return;
-    var p = PLACES[+btn.getAttribute("data-id")];
+    var p = byId[+btn.getAttribute("data-id")];
+    if (!p) return;
     if (btn.classList.contains("fav-del")) toggleFav(p);
     else {
       select(p, true);
@@ -364,9 +404,12 @@
   // ---------- Пошук ----------
   var form = document.getElementById("search");
   var q = document.getElementById("q");
-  document.getElementById("places-list").innerHTML = PLACES.slice()
-    .sort(function (a, b) { return a.name.localeCompare(b.name, "uk"); })
-    .map(function (p) { return '<option value="' + esc(p.name) + '">'; }).join("");
+  function renderDatalist() {
+    document.getElementById("places-list").innerHTML = PLACES.slice()
+      .sort(function (a, b) { return a.name.localeCompare(b.name, "uk"); })
+      .map(function (p) { return '<option value="' + esc(p.name) + '">'; }).join("");
+  }
+  renderDatalist();
 
   function findPlace(text) {
     var k = norm(text);
@@ -397,6 +440,188 @@
       var v = norm(q.value);
       if (PLACES.some(function (p) { return norm(p.name) === v; })) doSearch();
     }
+  });
+
+  // ---------- Додавання населеного пункту (кнопка «＋») ----------
+  var addModal = document.getElementById("add-modal");
+  var addBtn = document.getElementById("btn-add");
+  var addForm = document.getElementById("add-form");
+  var addQ = document.getElementById("add-q");
+  var addList = document.getElementById("add-list");
+  var addStatus = document.getElementById("add-status");
+  var addSubmit = document.getElementById("add-submit");
+  var addItems = [], addActive = -1, addChosen = null;
+  var addTimer = null, addAbort = null, addSeq = 0, addFallbackReady = false;
+
+  // Чи є вже такий пункт на карті (близько за координатами або однакова назва поруч).
+  function findDuplicate(item) {
+    var k = norm(item.name);
+    for (var i = 0; i < PLACES.length; i++) {
+      var d = distanceKm(PLACES[i].lat, PLACES[i].lon, item.lat, item.lon);
+      if (d < 1.5 || (d < 6 && PLACES[i].keys[0] === k)) return PLACES[i];
+    }
+    return null;
+  }
+
+  function addCustomPlace(item) {
+    var dup = findDuplicate(item);
+    if (dup) {
+      select(dup, true);
+      toast("«" + dup.name + "» уже є на карті");
+      return dup;
+    }
+    var customCount = PLACES.filter(function (p) { return p.custom; }).length;
+    if (customCount >= MAX_CUSTOM) { toast("Досягнуто ліміту доданих пунктів (" + MAX_CUSTOM + ")"); return null; }
+    var p = makePlace({ name: item.name, sub: item.sub, lat: item.lat, lon: item.lon, src: "osm", custom: true });
+    PLACES.push(p);
+    addMarker(p);
+    saveCustom();
+    renderDatalist();
+    select(p, true);
+    toast("✅ " + p.name + " — додано на карту");
+    return p;
+  }
+
+  function removeCustomPlace(p) {
+    if (!p || !p.custom) return;
+    if (!window.confirm("Видалити «" + p.name + "» з карти?")) return;
+    if (selected === p) select(null);
+    markers[p.id].remove();
+    delete markers[p.id];
+    delete byId[p.id];
+    PLACES.splice(PLACES.indexOf(p), 1);
+    favs.delete(p.key);
+    saveFavs();
+    saveCustom();
+    renderFavs();
+    renderDatalist();
+    toast(p.name + " — видалено з карти");
+  }
+
+  cardBody.addEventListener("click", function (e) {
+    if (e.target.closest('[data-act="del"]')) removeCustomPlace(selected);
+  });
+
+  function setAddStatus(msg) { addStatus.textContent = msg || ""; }
+
+  function renderAddItems() {
+    addList.innerHTML = addItems.map(function (it, i) {
+      return '<li id="add-opt-' + i + '" role="option" data-i="' + i + '" class="combo-item' +
+        (i === addActive ? " active" : "") + '" aria-selected="' + (i === addActive ? "true" : "false") + '">' +
+        '<span class="ci-main"><b>' + esc(it.name) + '</b> <span class="ci-kind">' + esc(it.kind) + "</span>" +
+        (it.dup ? ' <span class="ci-dup">✓ вже на карті</span>' : "") + "</span>" +
+        '<span class="ci-sub">' + esc(it.sub) + "</span></li>";
+    }).join("");
+    addList.hidden = addItems.length === 0;
+    addQ.setAttribute("aria-expanded", addItems.length ? "true" : "false");
+    if (addActive >= 0) addQ.setAttribute("aria-activedescendant", "add-opt-" + addActive);
+    else addQ.removeAttribute("aria-activedescendant");
+  }
+
+  function setActive(i) {
+    addActive = i;
+    renderAddItems();
+    var el = document.getElementById("add-opt-" + i);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }
+
+  function chooseItem(i) {
+    var it = addItems[i];
+    if (!it) return;
+    addChosen = it;
+    addActive = i;
+    addQ.value = it.name;
+    addSubmit.disabled = false;
+    addSubmit.textContent = it.dup ? "Показати на карті" : "Додати";
+    renderAddItems();
+    setAddStatus("Обрано: " + it.name + " (" + it.sub + "). Натисніть «" + addSubmit.textContent + "».");
+  }
+
+  function runAddSearch(fallback) {
+    var text = addQ.value.trim();
+    clearTimeout(addTimer);
+    if (addAbort) addAbort.abort();
+    addItems = []; addActive = -1; addFallbackReady = false;
+    renderAddItems();
+    if (text.length < 2) { setAddStatus("Введіть щонайменше 2 літери назви."); return; }
+    var seq = ++addSeq;
+    addAbort = new AbortController();
+    setAddStatus("Пошук…");
+    GEO.search(text, { signal: addAbort.signal, fallback: !!fallback }).then(function (items) {
+      if (seq !== addSeq) return;
+      items.forEach(function (it) { it.dup = !!findDuplicate(it); });
+      addItems = items;
+      addActive = -1;
+      renderAddItems();
+      setAddStatus(items.length
+        ? "Знайдено: " + items.length + ". Оберіть пункт зі списку."
+        : "Нічого не знайдено в Житомирській області. Перевірте написання.");
+    }).catch(function (err) {
+      if (seq !== addSeq || (err && err.name === "AbortError")) return;
+      if (fallback) {
+        setAddStatus("Сервіс пошуку недоступний. Перевірте інтернет і спробуйте ще раз.");
+      } else {
+        addFallbackReady = true;
+        setAddStatus("Основний сервіс пошуку недоступний. Натисніть Enter, щоб спробувати запасний.");
+      }
+    });
+  }
+
+  function openAdd() {
+    addQ.value = "";
+    addItems = []; addActive = -1; addChosen = null; addFallbackReady = false;
+    addSubmit.disabled = true;
+    addSubmit.textContent = "Додати";
+    renderAddItems();
+    setAddStatus("Почніть вводити назву й оберіть пункт зі списку.");
+    addModal.hidden = false;
+    setTimeout(function () { addQ.focus(); }, 0);
+  }
+
+  function closeAdd() {
+    clearTimeout(addTimer);
+    if (addAbort) addAbort.abort();
+    addSeq++;
+    addModal.hidden = true;
+    addBtn.focus();
+  }
+
+  addBtn.addEventListener("click", openAdd);
+  document.getElementById("add-close").addEventListener("click", closeAdd);
+  document.getElementById("add-cancel").addEventListener("click", closeAdd);
+  addModal.addEventListener("click", function (e) { if (e.target.hasAttribute("data-close")) closeAdd(); });
+
+  addQ.addEventListener("input", function () {
+    addChosen = null;
+    addSubmit.disabled = true;
+    addSubmit.textContent = "Додати";
+    clearTimeout(addTimer);
+    addTimer = setTimeout(function () { runAddSearch(false); }, 300);
+  });
+
+  addQ.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown" && addItems.length) { e.preventDefault(); setActive((addActive + 1) % addItems.length); }
+    else if (e.key === "ArrowUp" && addItems.length) { e.preventDefault(); setActive((addActive - 1 + addItems.length) % addItems.length); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (addChosen) addSubmit.click();
+      else if (addItems.length) chooseItem(addActive >= 0 ? addActive : 0);
+      else if (addFallbackReady) runAddSearch(true);
+      else if (addQ.value.trim().length >= 2) runAddSearch(false);
+    }
+  });
+
+  addList.addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-i]");
+    if (li) { chooseItem(+li.getAttribute("data-i")); addSubmit.focus(); }
+  });
+
+  addForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!addChosen) return;
+    var item = addChosen;
+    closeAdd();
+    addCustomPlace(item);
   });
 
   // ---------- Тема ----------
@@ -430,9 +655,23 @@
   }
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { select(null); setFavPanel(false); }
-    if (e.key === "/" && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+    if (e.key === "Escape") {
+      if (!addModal.hidden) { closeAdd(); return; }
+      select(null); setFavPanel(false);
+    }
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") { e.preventDefault(); q.focus(); }
   });
+
+  // Збережені раніше доданим користувачем пункти.
+  loadCustom().forEach(function (c) {
+    if (findDuplicate(c)) return;
+    var p = makePlace(c);
+    PLACES.push(p);
+    addMarker(p);
+  });
+  renderFavs();
+  renderDatalist();
 
   // ---------- Встановлення як застосунок (PWA) ----------
   var installBtn = document.getElementById("btn-install");
@@ -467,5 +706,5 @@
   }
 
   // Для перевірки з консолі / тестів.
-  window.ZT = { places: PLACES, select: select, findPlace: findPlace };
+  window.ZT = { places: PLACES, select: select, findPlace: findPlace, addCustom: addCustomPlace };
 })();

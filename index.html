@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Підліт до Житомира</title>
   <meta name="description" content="Відстань по прямій до центру Житомира та орієнтовний час підльоту реактивного дрона (300–400 км/год) з населених пунктів області.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' https://tile.openstreetmap.org; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' https://tile.openstreetmap.org https://photon.komoot.io https://nominatim.openstreetmap.org; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
   <meta name="theme-color" content="#0f172a">
   <meta name="color-scheme" content="light dark">
   <meta name="mobile-web-app-capable" content="yes">
@@ -36,6 +36,7 @@
         <input id="q" type="search" list="places-list" placeholder="Пошук населеного пункту…"
                aria-label="Назва населеного пункту" enterkeyhint="search" spellcheck="false">
         <datalist id="places-list"></datalist>
+        <button id="btn-add" type="button" class="icon-btn add-btn" title="Додати населений пункт" aria-label="Додати населений пункт" aria-haspopup="dialog">＋</button>
         <button type="submit" class="icon-btn" title="Знайти" aria-label="Знайти">🔍</button>
       </form>
 
@@ -77,7 +78,10 @@
 
   <section id="card" class="card place-card" hidden aria-live="polite">
     <div class="panel-head">
-      <h2 id="card-title"></h2>
+      <div class="card-heading">
+        <h2 id="card-title"></h2>
+        <p id="card-sub" class="muted tiny card-sub" hidden></p>
+      </div>
       <div>
         <button id="card-fav" class="icon-btn star" type="button" aria-pressed="false" title="Додати в обране">☆</button>
         <button id="card-close" class="icon-btn small" type="button" aria-label="Закрити">✕</button>
@@ -86,10 +90,32 @@
     <div id="card-body"></div>
   </section>
 
+  <div id="add-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <section class="card modal-box" role="dialog" aria-modal="true" aria-labelledby="add-title">
+      <div class="panel-head">
+        <h2 id="add-title">Додати населений пункт</h2>
+        <button id="add-close" class="icon-btn small" type="button" aria-label="Закрити">✕</button>
+      </div>
+      <p class="muted tiny">Житомирська область. Пункт буде збережено на цьому пристрої й працюватиме як усі інші.</p>
+      <form id="add-form" autocomplete="off">
+        <input id="add-q" type="text" role="combobox" aria-expanded="false" aria-controls="add-list" aria-autocomplete="list"
+               placeholder="Назва, наприклад: Іванківці" enterkeyhint="search" spellcheck="false" maxlength="60">
+        <ul id="add-list" class="combo-list" role="listbox" aria-label="Знайдені населені пункти" hidden></ul>
+        <p id="add-status" class="muted tiny add-status" role="status" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button id="add-cancel" class="btn" type="button">Скасувати</button>
+          <button id="add-submit" class="btn primary" type="submit" disabled>Додати</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="js/places.js"></script>
+  <script src="js/geocode.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

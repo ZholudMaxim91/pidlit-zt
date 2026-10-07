@@ -1,5 +1,5 @@
 /* Service worker: офлайн-робота інтерфейсу та кеш переглянутих тайлів карти. */
-var VERSION = "v1";
+var VERSION = "v2";
 var SHELL_CACHE = "zt-shell-" + VERSION;
 var TILE_CACHE = "zt-tiles-v1";
 var TILE_LIMIT = 800;
@@ -10,6 +10,7 @@ var SHELL = [
   "css/app.css",
   "js/theme-init.js",
   "js/places.js",
+  "js/geocode.js",
   "js/app.js",
   "vendor/leaflet/leaflet.css",
   "vendor/leaflet/leaflet.js",

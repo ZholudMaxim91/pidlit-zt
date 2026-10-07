@@ -1,0 +1,266 @@
+/* ---------- Токени теми ---------- */
+:root {
+  --bg: #e9eef2;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-solid: #ffffff;
+  --text: #1b2430;
+  --muted: #5d6b7a;
+  --border: rgba(15, 23, 42, 0.12);
+  --accent: #d32f2f;
+  --accent-soft: rgba(211, 47, 47, 0.12);
+  --gold: #f5b301;
+  --shadow: 0 4px 18px rgba(15, 23, 42, 0.16);
+  --label-halo: #ffffff;
+  --z0: #e53935; --z1: #fb8c00; --z2: #fdd835; --z3: #7cb342; --z4: #26a69a;
+  --radius: 14px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --surface: rgba(17, 25, 40, 0.92);
+  --surface-solid: #111928;
+  --text: #e6edf5;
+  --muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.22);
+  --accent: #ff6b6b;
+  --accent-soft: rgba(255, 107, 107, 0.16);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  --label-halo: #0b1220;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+#map { position: fixed; inset: 0; background: var(--bg); }
+
+/* Темна тема для OSM-тайлів: інверсія з поверненням відтінків. */
+:root[data-theme="dark"] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9) saturate(0.7);
+}
+:root[data-theme="dark"] .leaflet-container { background: #1a2333; }
+
+.muted { color: var(--muted); }
+.tiny { font-size: 12px; margin: 6px 0 0; }
+.warn { color: var(--text); opacity: 0.85; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+.icon-btn {
+  min-width: 42px; height: 42px; padding: 0 10px;
+  border: 0; background: transparent; border-radius: 10px;
+  font-size: 18px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+}
+.icon-btn:hover { background: var(--accent-soft); }
+.icon-btn.small { min-width: 32px; height: 32px; font-size: 15px; }
+.card.icon-btn { border: 1px solid var(--border); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Верхня панель ---------- */
+.overlay-top {
+  position: fixed; z-index: 1000;
+  top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  pointer-events: none;
+}
+.overlay-top > * { pointer-events: auto; }
+.topbar {
+  width: 100%;
+  display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap;
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+
+.brand { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
+.brand-icon { font-size: 22px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-text small { color: var(--muted); font-size: 12px; }
+
+.search { flex: 1 1 260px; max-width: 460px; display: flex; align-items: center; padding: 0 2px 0 12px; }
+.search input {
+  flex: 1; min-width: 0; height: 42px;
+  border: 0; outline: 0; background: transparent; color: var(--text);
+  font-size: 16px; /* без автозуму на iOS */
+}
+.search input::placeholder { color: var(--muted); }
+.search:focus-within { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+.actions { display: flex; gap: 8px; margin-left: auto; }
+.badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--gold); color: #1b2430; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.install-btn {
+  height: 42px; padding: 0 14px; border: 1px solid var(--border);
+  background: var(--accent); color: #fff; font-weight: 600; border-radius: var(--radius);
+}
+
+/* ---------- Шари та легенда ---------- */
+.layers { width: 250px; padding: 10px 12px; }
+.layers-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; user-select: none; }
+.switch > span:last-child { white-space: nowrap; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.slider {
+  position: relative; width: 40px; height: 22px; flex: none;
+  border-radius: 11px; background: var(--border); transition: background .2s;
+}
+.slider::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::after { transform: translateX(18px); }
+.switch input:focus-visible + .slider { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.legend { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.legend li { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.sw {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none;
+  border: 1px solid rgba(0,0,0,.25); vertical-align: -1px;
+}
+.sw.z0 { background: var(--z0); } .sw.z1 { background: var(--z1); } .sw.z2 { background: var(--z2); }
+.sw.z3 { background: var(--z3); } .sw.z4 { background: var(--z4); }
+
+/* ---------- Обране ---------- */
+.fav-panel { width: min(360px, 100%); padding: 8px 10px 10px; max-height: 50vh; overflow: auto; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel-head h2 { margin: 0; font-size: 19px; }
+.fav-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.fav-list li { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--border); }
+.fav-go {
+  flex: 1; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px;
+  padding: 9px 6px; border: 0; background: transparent; text-align: left; border-radius: 8px;
+}
+.fav-go:hover { background: var(--accent-soft); }
+.fav-name { font-weight: 600; }
+.fav-meta { color: var(--muted); font-size: 13px; white-space: nowrap; }
+#fav-empty { margin: 8px 2px 2px; font-size: 13px; }
+
+/* ---------- Картка вибраного пункту ---------- */
+.place-card {
+  position: fixed; z-index: 1001;
+  left: 50%; transform: translateX(-50%);
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 12px));
+  width: min(400px, calc(100% - 16px));
+  padding: 10px 14px 12px;
+}
+.star { font-size: 24px; color: var(--muted); }
+.star.on { color: var(--gold); }
+.big { font-size: 26px; font-weight: 800; display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; }
+.big .sw { width: 16px; height: 16px; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 14px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 600; text-align: right; }
+
+.toast {
+  position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%);
+  top: calc(max(8px, env(safe-area-inset-top)) + 56px); max-width: calc(100% - 32px);
+  padding: 10px 16px; border-radius: 12px;
+  background: var(--surface-solid); color: var(--text); border: 1px solid var(--border);
+  box-shadow: var(--shadow); text-align: center;
+}
+
+/* ---------- Маркери на карті ---------- */
+.pm-wrap { background: transparent; border: 0; }
+.pm { position: relative; width: 18px; height: 18px; }
+.pm .dot {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45);
+  transition: transform .12s;
+}
+:root[data-theme="dark"] .pm .dot { border-color: #0b1220; }
+.pm.z0 .dot { background: var(--z0); } .pm.z1 .dot { background: var(--z1); } .pm.z2 .dot { background: var(--z2); }
+.pm.z3 .dot { background: var(--z3); } .pm.z4 .dot { background: var(--z4); }
+.pm .lbl {
+  position: absolute; left: 22px; top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-weight: 700; font-size: 13px; color: var(--text);
+  text-shadow: 0 0 3px var(--label-halo), 0 0 3px var(--label-halo), 0 0 2px var(--label-halo);
+  pointer-events: auto;
+}
+/* На дрібному масштабі підписи пунктів біля Житомира злипаються — ховаємо (видно при наведенні/виборі). */
+.zoom-lo .pm.near .lbl, .zoom-xlo .pm.mid .lbl { display: none; }
+.zoom-lo .pm.near.sel .lbl, .zoom-lo .pm.near.fav .lbl,
+.zoom-xlo .pm.mid.sel .lbl, .zoom-xlo .pm.mid.fav .lbl,
+.leaflet-marker-icon:hover .pm .lbl { display: block !important; }
+.pm.fav .dot { box-shadow: 0 0 0 3px var(--gold), 0 1px 6px rgba(0,0,0,.5); }
+.pm.fav .lbl::before { content: "★ "; color: var(--gold); }
+.pm.sel .dot, .leaflet-marker-icon:hover .pm .dot { transform: scale(1.35); }
+.pm.sel .lbl { color: var(--accent); }
+
+.target-icon { background: transparent; border: 0; }
+.target-dot {
+  display: block; width: 28px; height: 28px; border-radius: 50%;
+  background: radial-gradient(circle, #d32f2f 0 5px, #fff 5px 8px, #d32f2f 8px 11px, rgba(211,47,47,.25) 11px);
+  box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0,0,0,.5);
+}
+
+/* Підказки */
+.leaflet-tooltip.ztip {
+  background: var(--surface-solid); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 8px 10px; font-size: 13px; line-height: 1.45;
+}
+.leaflet-tooltip-top.ztip::before { border-top-color: var(--surface-solid); }
+.tt-title { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
+.tt-row { white-space: nowrap; }
+
+.leaflet-tooltip.zone-label {
+  background: transparent; border: 0; box-shadow: none; padding: 0;
+  font-weight: 800; font-size: 12px; color: var(--text); opacity: .75 !important;
+  text-shadow: 0 0 3px var(--label-halo), 0 0 3px var(--label-halo);
+}
+.leaflet-tooltip.zone-label::before { display: none; }
+
+/* Елементи керування Leaflet у темній темі */
+:root[data-theme="dark"] .leaflet-bar a {
+  background: var(--surface-solid); color: var(--text); border-bottom-color: var(--border);
+}
+:root[data-theme="dark"] .leaflet-control-attribution {
+  background: rgba(17, 25, 40, .8); color: var(--muted);
+}
+:root[data-theme="dark"] .leaflet-control-attribution a { color: #8ab4f8; }
+.leaflet-bottom.leaflet-right { margin-bottom: env(safe-area-inset-bottom); }
+
+/* ---------- Мобільні ---------- */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; }
+  .brand { padding: 4px 10px; flex: 1 1 0; min-width: 0; }
+  .brand-icon { font-size: 18px; }
+  .brand-text { min-width: 0; }
+  .brand-text strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-text small { display: none; }
+  .actions { gap: 6px; }
+  .icon-btn { min-width: 40px; padding: 0 8px; }
+  .search { order: 3; flex-basis: 100%; max-width: none; }
+  .layers { width: auto; max-width: 210px; padding: 8px 10px; }
+  .layers .tiny { font-size: 11px; }
+  .legend { font-size: 12px; }
+  .place-card { bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px)); }
+  .leaflet-control-zoom { display: none; }
+  .toast { top: calc(max(8px, env(safe-area-inset-top)) + 106px); }
+}
+@media (max-width: 400px) {
+  .install-btn { padding: 0 10px; font-size: 0; }
+  .install-btn::before { content: "📲"; font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

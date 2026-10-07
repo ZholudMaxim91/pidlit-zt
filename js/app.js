@@ -673,6 +673,29 @@
   renderFavs();
   renderDatalist();
 
+  // Пункти, збережені раніше з латинською назвою (наприклад, «Chudniv»), тихо замінюємо
+  // на українську; якщо сервіс недоступний, спробуємо наступного запуску.
+  (function localizeSavedNames() {
+    var todo = PLACES.filter(function (p) { return p.custom && !GEO.hasCyrillic(p.name); });
+    (function next() {
+      var p = todo.shift();
+      if (!p) return;
+      GEO.localize(p).then(function (best) {
+        if (!best || !byId[p.id]) return;
+        p.name = best.name;
+        p.sub = best.sub;
+        p.keys = [p.name].map(norm);
+        refreshMarker(p);
+        var el = markers[p.id].getElement();
+        if (el) el.setAttribute("title", p.name);
+        saveCustom();
+        renderFavs();
+        renderDatalist();
+        if (selected === p) renderCard();
+      }).catch(function () { /* не критично */ }).then(function () { setTimeout(next, 800); });
+    })();
+  })();
+
   // ---------- Встановлення як застосунок (PWA) ----------
   var installBtn = document.getElementById("btn-install");
   var deferredPrompt = null;

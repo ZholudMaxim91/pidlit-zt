@@ -117,9 +117,34 @@
       return getJson(url, opts.signal).then(fromNominatim);
     }
     // lat/lon — зсув видачі до Житомира, osm_tag=place — лише населені пункти.
-    var purl = PHOTON + "?q=" + q + "&limit=20&osm_tag=place&bbox=" + bbox + "&lat=50.25&lon=28.66";
+    // lang=default — назви як у OSM (в Україні це українські); без нього Photon підлаштовується
+    // під мову браузера (Accept-Language) і для англомовного браузера віддає «Chudniv».
+    var purl = PHOTON + "?q=" + q + "&lang=default&limit=20&osm_tag=place&bbox=" + bbox + "&lat=50.25&lon=28.66";
     return getJson(purl, opts.signal).then(fromPhoton);
   }
 
-  window.ZTGeocode = { search: search, inOblastBox: inOblastBox };
+  function hasCyrillic(s) { return /[А-Яа-яІіЇїЄєҐґ]/.test(String(s)); }
+
+  function roughKm(lat1, lon1, lat2, lon2) {
+    var dy = (lat2 - lat1) * 111.2;
+    var dx = (lon2 - lon1) * 111.2 * Math.cos(lat1 * Math.PI / 180);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  /**
+   * Знаходить українську назву для пункту, збереженого раніше з латинською назвою.
+   * Повертає найближчий (до 3 км) збіг із кириличною назвою або null.
+   */
+  function localize(item, signal) {
+    return search(item.name, { signal: signal }).then(function (list) {
+      var best = null, bestD = 3;
+      list.forEach(function (c) {
+        var d = roughKm(item.lat, item.lon, c.lat, c.lon);
+        if (hasCyrillic(c.name) && d < bestD) { best = c; bestD = d; }
+      });
+      return best;
+    });
+  }
+
+  window.ZTGeocode = { search: search, localize: localize, hasCyrillic: hasCyrillic, inOblastBox: inOblastBox };
 })();

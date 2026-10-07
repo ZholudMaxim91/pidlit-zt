@@ -16,7 +16,10 @@
   // Підписи пунктів біля Житомира ховаються на дрібному масштабі (видно при наведенні/виборі).
   var NEAR_KM = 25, NEAR_LABEL_ZOOM = 10;
   var MID_KM = 45, MID_LABEL_ZOOM = 8;
-  var LS = { theme: "zt-theme", zones: "zt-zones", favs: "zt-favorites", custom: "zt-custom-places" };
+  var LS = { theme: "zt-theme", zones: "zt-zones", favs: "zt-favorites", custom: "zt-custom-places", shared: "zt-shared-cache", admin: "zt-admin" };
+  // Спільний список пунктів: на самому сайті — відносний шлях, на дзеркалі GitHub Pages — адреса основного сайту.
+  var API_BASE = /\.github\.io$/.test(location.hostname) ? "https://pidlit-zt.pages.dev/api" : "/api";
+  var SYNC_EVERY_MS = 120000;
   var MAX_CUSTOM = 300;          // скільки доданих користувачем пунктів зберігаємо
 
   var TARGET = window.ZT_TARGET;
@@ -46,24 +49,34 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* приватний режим */ } }
 
-  // Користувацькі пункти (зберігаються в цьому браузері/на цьому телефоні).
-  function loadCustom() {
-    var raw;
-    try { raw = JSON.parse(lsGet(LS.custom)) || []; } catch (e) { raw = []; }
-    if (!Array.isArray(raw)) return [];
-    return raw.slice(0, MAX_CUSTOM).filter(function (c) {
-      return c && typeof c.name === "string" && c.name.length > 0 && c.name.length <= 80 &&
-        isFinite(c.lat) && isFinite(c.lon) && GEO.inOblastBox(+c.lat, +c.lon);
-    }).map(function (c) {
-      return { name: c.name, sub: typeof c.sub === "string" ? c.sub.slice(0, 120) : "",
-               lat: +c.lat, lon: +c.lon, src: "osm", custom: true };
-    });
+  // Пункти, додані користувачами. «Спільні» (shared) зберігаються на сервері й видні всім;
+  // «очікують» (pending) лежать лише на цьому пристрої, поки не вдасться надіслати на сервер.
+  function validSaved(c) {
+    return c && typeof c.name === "string" && c.name.length > 0 && c.name.length <= 80 &&
+      isFinite(c.lat) && isFinite(c.lon) && GEO.inOblastBox(+c.lat, +c.lon);
   }
-  function saveCustom() {
-    var list = PLACES.filter(function (p) { return p.custom; }).map(function (p) {
+  function readList(key) {
+    var raw;
+    try { raw = JSON.parse(lsGet(key)) || []; } catch (e) { raw = []; }
+    return Array.isArray(raw) ? raw.slice(0, MAX_CUSTOM * 2).filter(validSaved) : [];
+  }
+  function toPlaceData(c, shared) {
+    return { name: c.name, sub: typeof c.sub === "string" ? c.sub.slice(0, 120) : "",
+             lat: +c.lat, lon: +c.lon, src: "osm", custom: true, shared: shared, sid: shared ? String(c.id) : "" };
+  }
+  function loadPending() { return readList(LS.custom).slice(0, MAX_CUSTOM).map(function (c) { return toPlaceData(c, false); }); }
+  function loadSharedCache() { return readList(LS.shared).map(function (c) { return toPlaceData(c, true); }); }
+  function savePending() {
+    var list = PLACES.filter(function (p) { return p.custom && !p.shared; }).map(function (p) {
       return { name: p.name, sub: p.sub, lat: p.lat, lon: p.lon };
     });
     lsSet(LS.custom, JSON.stringify(list));
+  }
+  function saveSharedCache() {
+    var list = PLACES.filter(function (p) { return p.shared; }).map(function (p) {
+      return { id: p.sid, name: p.name, sub: p.sub, lat: p.lat, lon: p.lon };
+    });
+    lsSet(LS.shared, JSON.stringify(list));
   }
 
   // ---------- Геометрія ----------
@@ -320,8 +333,9 @@
         "<dt>🧭 Напрямок загрози</dt><dd>" + DIRS[dirIndex(p.bearing)] + " (" + DIRS_SHORT[dirIndex(p.bearing)] + ", " + Math.round(p.bearing) + "°)</dd>" +
       "</dl>" +
       (p.src === "map" ? '<p class="muted tiny">Координати визначено за картою, точність ≈ ±0,5 км.</p>' : "") +
-      (p.custom ? '<p class="muted tiny">➕ Додано вами · координати OpenStreetMap. ' +
-        '<button type="button" class="link-btn" data-act="del">Видалити з карти</button></p>' : "");
+      (p.custom ? '<p class="muted tiny">' +
+        (p.shared ? "➕ Додано користувачем, видно всім · координати OpenStreetMap." : "⚠️ Збережено лише на цьому пристрої, надішлю на спільну карту, коли з'явиться зв'язок.") +
+        (!p.shared || isAdmin() ? ' <button type="button" class="link-btn" data-act="del">Видалити з карти</button>' : "") + "</p>" : "");
     card.hidden = false;
   }
 
@@ -463,6 +477,85 @@
     return null;
   }
 
+  function isAdmin() { return !!lsGet(LS.admin); }
+
+  function api(method, path, body) {
+    var headers = { Accept: "application/json" };
+    if (body) headers["Content-Type"] = "application/json";
+    if (method === "DELETE") headers["X-Admin-Token"] = lsGet(LS.admin) || "";
+    return fetch(API_BASE + path, { method: method, headers: headers, cache: "no-store", body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw Object.assign(new Error(j.error || "HTTP " + r.status), { status: r.status, code: j.error });
+          return j;
+        });
+      });
+  }
+
+  // Прибирає пункт з карти (без звернення до сервера).
+  function dropPlace(p) {
+    if (selected === p) select(null);
+    if (markers[p.id]) { markers[p.id].remove(); delete markers[p.id]; }
+    delete byId[p.id];
+    PLACES.splice(PLACES.indexOf(p), 1);
+  }
+
+  function pushPlace(data) {
+    var p = makePlace(data);
+    PLACES.push(p);
+    addMarker(p);
+    return p;
+  }
+
+  function addSharedItem(it) {
+    var data = toPlaceData(it, true);
+    var dup = findDuplicate(data);
+    if (dup && !dup.shared) { dropPlace(dup); savePending(); dup = null; }   // пункт, що чекав, уже на сервері
+    if (dup) return dup;
+    return pushPlace(data);
+  }
+
+  var syncing = false, lastSync = 0;
+  // Підтягує спільний список із сервера: додає нові пункти, прибирає видалені.
+  function syncShared() {
+    if (syncing) return Promise.resolve();
+    syncing = true;
+    return api("GET", "/places").then(function (res) {
+      var list = (res.places || []).filter(validSaved);
+      var ids = {};
+      list.forEach(function (it) { ids[String(it.id)] = true; });
+      PLACES.filter(function (p) { return p.shared && !ids[p.sid]; }).forEach(dropPlace);
+      list.forEach(function (it) {
+        if (!PLACES.some(function (p) { return p.sid === String(it.id); })) addSharedItem(it);
+      });
+      lastSync = Date.now();
+      saveSharedCache();
+      renderFavs();
+      renderDatalist();
+    }).catch(function () { /* офлайн або сервер ще не налаштовано: лишаємо те, що є */ })
+      .then(function () { syncing = false; return publishPending(); });
+  }
+
+  // Надсилає на сервер пункти, додані без зв'язку.
+  function publishPending() {
+    var queue = PLACES.filter(function (p) { return p.custom && !p.shared; });
+    if (!queue.length || !lastSync) return Promise.resolve();
+    var changed = false;
+    return queue.reduce(function (chain, p) {
+      return chain.then(function (stop) {
+        if (stop) return true;
+        return api("POST", "/places", { name: p.name, sub: p.sub, lat: p.lat, lon: p.lon }).then(function () {
+          changed = true;
+          return false;
+        }).catch(function (e) {
+          if (e && e.status === 400) { dropPlace(p); savePending(); return false; }   // сервер відхилив назавжди
+          var temporary = !e || !e.status || e.code === "limit_reached" || e.code === "rate_limited";
+          return temporary;                                                           // немає зв'язку/ліміт — спробуємо пізніше
+        });
+      });
+    }, Promise.resolve(false)).then(function () { if (changed) return syncShared(); });
+  }
+
   function addCustomPlace(item) {
     var dup = findDuplicate(item);
     if (dup) {
@@ -470,32 +563,46 @@
       toast("«" + dup.name + "» уже є на карті");
       return dup;
     }
-    var customCount = PLACES.filter(function (p) { return p.custom; }).length;
-    if (customCount >= MAX_CUSTOM) { toast("Досягнуто ліміту доданих пунктів (" + MAX_CUSTOM + ")"); return null; }
-    var p = makePlace({ name: item.name, sub: item.sub, lat: item.lat, lon: item.lon, src: "osm", custom: true });
-    PLACES.push(p);
-    addMarker(p);
-    saveCustom();
-    renderDatalist();
-    select(p, true);
-    toast("✅ " + p.name + " — додано на карту");
-    return p;
+    var pending = PLACES.filter(function (p) { return p.custom && !p.shared; }).length;
+    if (pending >= MAX_CUSTOM) { toast("Досягнуто ліміту пунктів, що очікують відправки (" + MAX_CUSTOM + ")"); return null; }
+    var data = { name: item.name, sub: item.sub, lat: Math.round(item.lat * 1e5) / 1e5, lon: Math.round(item.lon * 1e5) / 1e5 };
+    toast("Додаю «" + data.name + "»…", 6000);
+    return api("POST", "/places", data).then(function (res) {
+      var p = addSharedItem(res.place);
+      saveSharedCache();
+      renderDatalist();
+      select(p, true);
+      toast(res.duplicate ? "«" + p.name + "» уже є на карті" : "✅ " + p.name + " — додано на карту для всіх");
+    }).catch(function (e) {
+      if (e && e.code === "rate_limited") { toast("Забагато додавань за годину. Спробуйте пізніше."); return; }
+      if (e && e.code === "limit_reached") { toast("Спільна карта заповнена (ліміт пунктів)."); return; }
+      // Сервер недоступний: зберігаємо на пристрої й надішлемо пізніше.
+      var p = pushPlace(Object.assign({}, data, { src: "osm", custom: true, shared: false, sid: "" }));
+      savePending();
+      renderDatalist();
+      select(p, true);
+      toast("⚠️ " + p.name + " збережено лише на цьому пристрої: немає зв'язку зі спільною картою. Надішлю, коли з'явиться.", 7000);
+    });
   }
 
   function removeCustomPlace(p) {
     if (!p || !p.custom) return;
-    if (!window.confirm("Видалити «" + p.name + "» з карти?")) return;
-    if (selected === p) select(null);
-    markers[p.id].remove();
-    delete markers[p.id];
-    delete byId[p.id];
-    PLACES.splice(PLACES.indexOf(p), 1);
-    favs.delete(p.key);
-    saveFavs();
-    saveCustom();
-    renderFavs();
-    renderDatalist();
-    toast(p.name + " — видалено з карти");
+    if (p.shared && !isAdmin()) return;
+    if (!window.confirm("Видалити «" + p.name + "» з карти" + (p.shared ? " для ВСІХ користувачів" : "") + "?")) return;
+    var done = function () {
+      favs.delete(p.key);
+      saveFavs();
+      dropPlace(p);
+      savePending();
+      saveSharedCache();
+      renderFavs();
+      renderDatalist();
+      toast(p.name + " — видалено з карти");
+    };
+    if (!p.shared) { done(); return; }
+    api("DELETE", "/places/" + encodeURIComponent(p.sid)).then(done).catch(function (e) {
+      toast(e && e.status === 401 ? "Невірний ключ адміністратора" : "Не вдалося видалити: " + ((e && e.message) || "помилка"));
+    });
   }
 
   cardBody.addEventListener("click", function (e) {
@@ -663,20 +770,31 @@
     if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") { e.preventDefault(); q.focus(); }
   });
 
-  // Збережені раніше доданим користувачем пункти.
-  loadCustom().forEach(function (c) {
-    if (findDuplicate(c)) return;
-    var p = makePlace(c);
-    PLACES.push(p);
-    addMarker(p);
-  });
+  // Спершу показуємо кеш спільного списку та пункти, що чекають відправки, потім синхронізуємось із сервером.
+  loadSharedCache().forEach(function (c) { if (!findDuplicate(c)) pushPlace(c); });
+  loadPending().forEach(function (c) { if (!findDuplicate(c)) pushPlace(c); });
   renderFavs();
   renderDatalist();
+
+  // Режим власника: відкрити сайт із #admin=КЛЮЧ — ключ збережеться в цьому браузері.
+  (function () {
+    var m = /[#&]admin=([^&]+)/.exec(location.hash);
+    if (!m) return;
+    lsSet(LS.admin, decodeURIComponent(m[1]));
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    toast("🔑 Режим адміністратора ввімкнено на цьому пристрої");
+  })();
+
+  syncShared();
+  setInterval(syncShared, SYNC_EVERY_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && Date.now() - lastSync > 30000) syncShared();
+  });
 
   // Пункти, збережені раніше з латинською назвою (наприклад, «Chudniv»), тихо замінюємо
   // на українську; якщо сервіс недоступний, спробуємо наступного запуску.
   (function localizeSavedNames() {
-    var todo = PLACES.filter(function (p) { return p.custom && !GEO.hasCyrillic(p.name); });
+    var todo = PLACES.filter(function (p) { return p.custom && !p.shared && !GEO.hasCyrillic(p.name); });
     (function next() {
       var p = todo.shift();
       if (!p) return;
@@ -688,7 +806,7 @@
         refreshMarker(p);
         var el = markers[p.id].getElement();
         if (el) el.setAttribute("title", p.name);
-        saveCustom();
+        savePending();
         renderFavs();
         renderDatalist();
         if (selected === p) renderCard();
@@ -729,5 +847,5 @@
   }
 
   // Для перевірки з консолі / тестів.
-  window.ZT = { places: PLACES, select: select, findPlace: findPlace, addCustom: addCustomPlace };
+  window.ZT = { sync: syncShared, places: PLACES, select: select, findPlace: findPlace, addCustom: addCustomPlace };
 })();

@@ -1,5 +1,5 @@
 /* Service worker: офлайн-робота інтерфейсу та кеш переглянутих тайлів карти. */
-var VERSION = "v3";
+var VERSION = "v4";
 var SHELL_CACHE = "zt-shell-" + VERSION;
 var TILE_CACHE = "zt-tiles-v1";
 var TILE_LIMIT = 800;
@@ -67,6 +67,7 @@ self.addEventListener("fetch", function (event) {
   }
 
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.indexOf("/api/") === 0) return;   // API — завжди напряму в мережу
 
   // Свої файли: мережа з резервом у кеші (оновлення підхоплюються одразу, офлайн — з кешу).
   event.respondWith(
